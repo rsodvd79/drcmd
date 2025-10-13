@@ -1,6 +1,7 @@
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Runtime.InteropServices;
 using AiShell.IO;
 using AiShell.Models;
 
@@ -97,7 +98,9 @@ public sealed class AiCommandShell
         var userMessage = new ChatMessage("user", userInput);
         _conversation.Add(userMessage);
 
-        var responseContent = await _ollamaClient.SendChatAsync(_conversation, cancellationToken);
+        var conversationWithEnvironment = BuildConversationWithEnvironment();
+
+        var responseContent = await _ollamaClient.SendChatAsync(conversationWithEnvironment, cancellationToken);
         if (responseContent is null)
         {
             _conversation.Remove(userMessage);
@@ -156,6 +159,39 @@ public sealed class AiCommandShell
 
         var result = await _commandExecutor.ExecuteAsync(command, _currentDirectory, cancellationToken);
         PrintCommandResult(result);
+    }
+
+    private List<ChatMessage> BuildConversationWithEnvironment()
+    {
+        var environmentMessage = new ChatMessage("system", BuildEnvironmentDescription());
+
+        if (_conversation.Count == 0)
+        {
+            return new List<ChatMessage> { environmentMessage };
+        }
+
+        var conversation = new List<ChatMessage>(_conversation.Count + 1)
+        {
+            _conversation[0],
+            environmentMessage
+        };
+
+        for (var i = 1; i < _conversation.Count; i++)
+        {
+            conversation.Add(_conversation[i]);
+        }
+
+        return conversation;
+    }
+
+    private static string BuildEnvironmentDescription()
+    {
+        var osDescription = RuntimeInformation.OSDescription;
+        var architecture = RuntimeInformation.ProcessArchitecture;
+        var framework = RuntimeInformation.FrameworkDescription;
+        var currentDirectory = Directory.GetCurrentDirectory();
+
+        return $"Contesto ambiente: sistema operativo={osDescription} ({architecture}), framework={framework}, directory_corrente={currentDirectory}.";
     }
 
     private string? ReadInputLine(string prompt)
