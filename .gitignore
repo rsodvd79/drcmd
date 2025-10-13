@@ -1,0 +1,25 @@
+# Dotnet build artifacts
+bin/
+obj/
+**/bin/
+**/obj/
+
+# User-specific files
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+
+# IDEs
+.idea/
+.vs/
+.vscode/
+
+# Logs
+*.log
+*.tlog
+
+# OS files
+.DS_Store
+Thumbs.db
