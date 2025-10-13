@@ -1,3 +1,4 @@
+using System;
 using System.Diagnostics;
 using System.Text;
 
@@ -7,16 +8,7 @@ public sealed class CommandExecutor
 {
     public async Task<CommandExecutionResult> ExecuteAsync(string command, string workingDirectory, CancellationToken cancellationToken)
     {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "/bin/bash",
-            Arguments = "-lc " + QuoteArgument(command),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            WorkingDirectory = string.IsNullOrWhiteSpace(workingDirectory) ? Environment.CurrentDirectory : workingDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var startInfo = CreateStartInfo(command, workingDirectory);
 
         using var process = new Process { StartInfo = startInfo };
         var outputBuilder = new StringBuilder();
@@ -54,8 +46,30 @@ public sealed class CommandExecutor
         );
     }
 
-    private static string QuoteArgument(string argument)
+    private static ProcessStartInfo CreateStartInfo(string command, string workingDirectory)
     {
-        return "\"" + argument.Replace("\"", "\\\"") + "\"";
+        var startInfo = new ProcessStartInfo
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = string.IsNullOrWhiteSpace(workingDirectory) ? Environment.CurrentDirectory : workingDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        if (OperatingSystem.IsWindows())
+        {
+            startInfo.FileName = "cmd.exe";
+            startInfo.ArgumentList.Add("/c");
+            startInfo.ArgumentList.Add(command);
+        }
+        else
+        {
+            startInfo.FileName = "/bin/bash";
+            startInfo.ArgumentList.Add("-lc");
+            startInfo.ArgumentList.Add(command);
+        }
+
+        return startInfo;
     }
 }

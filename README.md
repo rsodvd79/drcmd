@@ -26,4 +26,5 @@ dotnet run
 ## Note
 - In caso di risposte anomale, la shell mostra il JSON restituito dal modello per facilitare il debug.
 - L'output dei comandi è mostrato senza messaggi aggiuntivi rispetto a quanto prodotto dal processo.
+- Compatibile con macOS/Linux (usa `/bin/bash`) e Windows (usa `cmd.exe`).
 - Premi `Ctrl+C` per interrompere l'esecuzione del comando corrente o chiudere rapidamente l'applicazione.
