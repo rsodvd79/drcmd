@@ -13,8 +13,10 @@ public sealed class AiCommandShell
     private readonly OllamaClient _ollamaClient;
     private readonly CommandExecutor _commandExecutor;
     private readonly List<ChatMessage> _conversation;
+    private readonly List<string> _commandHistory;
     private string _currentDirectory;
     private bool _autoAcceptAiCommands;
+    private int _historyPosition;
 
     public AiCommandShell(OllamaClient ollamaClient, CommandExecutor commandExecutor)
     {
@@ -38,8 +40,10 @@ public sealed class AiCommandShell
                 """
             )
         ];
+        _commandHistory = [];
         _currentDirectory = Directory.GetCurrentDirectory();
         _autoAcceptAiCommands = false;
+        _historyPosition = 0;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -49,7 +53,7 @@ public sealed class AiCommandShell
         while (!cancellationToken.IsCancellationRequested)
         {
             _currentDirectory = Directory.GetCurrentDirectory();
-            var prompt = $"ai-shell{GetPromptSuffix()}> ";
+            var prompt = BuildPrompt();
             Console.Write(prompt);
             var input = ReadInputLine(prompt);
 
@@ -152,6 +156,8 @@ public sealed class AiCommandShell
             return;
         }
 
+        AddToHistory(command);
+
         if (TryHandleBuiltInCommand(command))
         {
             return;
@@ -194,9 +200,28 @@ public sealed class AiCommandShell
         return $"Contesto ambiente: sistema operativo={osDescription} ({architecture}), framework={framework}, directory_corrente={currentDirectory}.";
     }
 
+    private string BuildPrompt()
+    {
+        var builder = new StringBuilder();
+        var userHost = $"{Environment.UserName}@{Environment.MachineName}";
+        var location = ShortenPath(_currentDirectory);
+
+        builder.Append("┌─[");
+        builder.Append(userHost);
+        builder.Append("]─[");
+        builder.Append(location);
+        builder.Append(']');
+
+        builder.AppendLine();
+        builder.Append("└─$ ");
+
+        return builder.ToString();
+    }
+
     private string? ReadInputLine(string prompt)
     {
         var buffer = new StringBuilder();
+        _historyPosition = _commandHistory.Count;
 
         while (true)
         {
@@ -217,6 +242,40 @@ public sealed class AiCommandShell
                 return buffer.ToString();
             }
 
+            if (keyInfo.Key == ConsoleKey.UpArrow)
+            {
+                if (_commandHistory.Count > 0)
+                {
+                    if (_historyPosition > 0)
+                    {
+                        _historyPosition--;
+                    }
+                    ReplaceInputBuffer(buffer, _commandHistory[_historyPosition]);
+                }
+                continue;
+            }
+
+            if (keyInfo.Key == ConsoleKey.DownArrow)
+            {
+                if (_commandHistory.Count > 0)
+                {
+                    if (_historyPosition < _commandHistory.Count)
+                    {
+                        _historyPosition++;
+                    }
+
+                    if (_historyPosition == _commandHistory.Count)
+                    {
+                        ReplaceInputBuffer(buffer, string.Empty);
+                    }
+                    else
+                    {
+                        ReplaceInputBuffer(buffer, _commandHistory[_historyPosition]);
+                    }
+                }
+                continue;
+            }
+
             if (keyInfo.Key == ConsoleKey.Backspace)
             {
                 if (buffer.Length > 0)
@@ -224,11 +283,13 @@ public sealed class AiCommandShell
                     buffer.Length -= 1;
                     Console.Write("\b \b");
                 }
+                _historyPosition = _commandHistory.Count;
                 continue;
             }
 
             if (keyInfo.Key == ConsoleKey.Tab)
             {
+                _historyPosition = _commandHistory.Count;
                 HandleTabCompletion(buffer, prompt);
                 continue;
             }
@@ -249,6 +310,7 @@ public sealed class AiCommandShell
             {
                 buffer.Append(ch);
                 Console.Write(ch);
+                _historyPosition = _commandHistory.Count;
             }
         }
     }
@@ -441,28 +503,6 @@ public sealed class AiCommandShell
         Console.WriteLine();
     }
 
-    private string GetPromptSuffix()
-    {
-        if (string.IsNullOrWhiteSpace(_currentDirectory))
-        {
-            return "\\?";
-        }
-
-        var trimmed = _currentDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (trimmed.Length == 0)
-        {
-            return $"\\{Path.DirectorySeparatorChar}";
-        }
-
-        var folder = Path.GetFileName(trimmed);
-        if (string.IsNullOrEmpty(folder))
-        {
-            folder = trimmed;
-        }
-
-        return "\\" + folder;
-    }
-
     private static void PrintHelp()
     {
         Console.WriteLine("help                Mostra questo messaggio.");
@@ -487,7 +527,8 @@ public sealed class AiCommandShell
 
         if (trimmed.Equals("cd", StringComparison.Ordinal))
         {
-            return ChangeDirectory(null);
+            ChangeDirectory(null);
+            return true;
         }
 
         if (!char.IsWhiteSpace(trimmed[2]))
@@ -498,13 +539,15 @@ public sealed class AiCommandShell
         var argument = trimmed[2..].Trim();
         if (argument.Length == 0)
         {
-            return ChangeDirectory(null);
+            ChangeDirectory(null);
+            return true;
         }
 
         var parts = argument.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0)
         {
-            return ChangeDirectory(null);
+            ChangeDirectory(null);
+            return true;
         }
 
         if (parts.Length > 1)
@@ -513,7 +556,8 @@ public sealed class AiCommandShell
             return true;
         }
 
-        return ChangeDirectory(parts[0]);
+        ChangeDirectory(parts[0]);
+        return true;
     }
 
     private void HandleAutoAcceptCommand(string command)
@@ -546,7 +590,7 @@ public sealed class AiCommandShell
         if (destination is null)
         {
             Console.Error.WriteLine("cd: directory non valida.");
-            return true;
+            return false;
         }
 
         try
@@ -555,18 +599,18 @@ public sealed class AiCommandShell
             if (!Directory.Exists(fullPath))
             {
                 Console.Error.WriteLine($"cd: nessuna directory '{target}'.");
-                return true;
+                return false;
             }
 
             Directory.SetCurrentDirectory(fullPath);
             _currentDirectory = Directory.GetCurrentDirectory();
+            return true;
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"cd: {ex.Message}");
+            return false;
         }
-
-        return true;
     }
 
     private string? ResolveDestination(string? target)
@@ -591,5 +635,68 @@ public sealed class AiCommandShell
         }
 
         return Path.Combine(_currentDirectory, cleaned);
+    }
+
+    private static string ShortenPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        var normalized = path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+        if (!string.IsNullOrEmpty(home))
+        {
+            var normalizedHome = home.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+            if (normalized.Equals(normalizedHome, StringComparison.OrdinalIgnoreCase))
+            {
+                return "~";
+            }
+
+            if (normalized.StartsWith(normalizedHome + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                var relative = normalized[(normalizedHome.Length + 1)..];
+                return relative.Length == 0 ? "~" : $"~{Path.DirectorySeparatorChar}{relative}";
+            }
+        }
+
+        return normalized;
+    }
+
+    private void AddToHistory(string command)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return;
+        }
+
+        if (_commandHistory.Count > 0
+            && string.Equals(_commandHistory[^1], command, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _commandHistory.Add(command);
+    }
+
+    private static void ReplaceInputBuffer(StringBuilder buffer, string content)
+    {
+        while (buffer.Length > 0)
+        {
+            Console.Write("\b \b");
+            buffer.Length -= 1;
+        }
+
+        buffer.Clear();
+
+        if (string.IsNullOrEmpty(content))
+        {
+            return;
+        }
+
+        buffer.Append(content);
+        Console.Write(content);
     }
 }
