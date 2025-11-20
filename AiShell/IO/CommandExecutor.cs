@@ -1,16 +1,23 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Text;
 
 namespace AiShell.IO;
 
 public sealed class CommandExecutor
 {
-    public async Task<CommandExecutionResult> ExecuteAsync(string command, string workingDirectory, CancellationToken cancellationToken)
+    public async Task<CommandExecutionResult> ExecuteAsync(
+        string command,
+        string workingDirectory,
+        CancellationToken cancellationToken,
+        TextWriter? standardOutput = null,
+        TextWriter? standardError = null)
     {
         var startInfo = CreateStartInfo(command, workingDirectory);
+        var outputStreamed = standardOutput is not null || standardError is not null;
 
-        using var process = new Process { StartInfo = startInfo };
+        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         var outputBuilder = new StringBuilder();
         var errorBuilder = new StringBuilder();
 
@@ -18,6 +25,7 @@ public sealed class CommandExecutor
         {
             if (args.Data is not null)
             {
+                standardOutput?.WriteLine(args.Data);
                 outputBuilder.AppendLine(args.Data);
             }
         };
@@ -25,25 +33,83 @@ public sealed class CommandExecutor
         {
             if (args.Data is not null)
             {
+                standardError?.WriteLine(args.Data);
                 errorBuilder.AppendLine(args.Data);
             }
         };
 
-        if (!process.Start())
+        try
         {
-            return new CommandExecutionResult(-1, string.Empty, "Impossibile avviare il processo.");
+            if (!process.Start())
+            {
+                return new CommandExecutionResult(
+                    -1,
+                    string.Empty,
+                    "Impossibile avviare il processo.",
+                    false,
+                    outputStreamed);
+            }
+        }
+        catch (Exception ex)
+        {
+            return new CommandExecutionResult(
+                -1,
+                string.Empty,
+                $"Errore di avvio del processo: {ex.Message}",
+                false,
+                outputStreamed);
         }
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        await process.WaitForExitAsync(cancellationToken);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            TryTerminateProcess(process);
+            try
+            {
+                await process.WaitForExitAsync();
+            }
+            catch
+            {
+                process.WaitForExit(1000);
+            }
+
+            return new CommandExecutionResult(
+                -1,
+                outputBuilder.ToString(),
+                errorBuilder.ToString(),
+                true,
+                outputStreamed
+            );
+        }
 
         return new CommandExecutionResult(
             process.ExitCode,
             outputBuilder.ToString(),
-            errorBuilder.ToString()
+            errorBuilder.ToString(),
+            false,
+            outputStreamed
         );
+    }
+
+    private static void TryTerminateProcess(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // Ignore termination errors
+        }
     }
 
     private static ProcessStartInfo CreateStartInfo(string command, string workingDirectory)

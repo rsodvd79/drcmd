@@ -7,6 +7,7 @@ namespace AiShell;
 
 public sealed class OllamaClient
 {
+    private readonly string _model;
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -16,14 +17,15 @@ public sealed class OllamaClient
 
     private readonly HttpClient _httpClient;
 
-    public OllamaClient(HttpClient httpClient)
+    public OllamaClient(HttpClient httpClient, string model)
     {
         _httpClient = httpClient;
+        _model = string.IsNullOrWhiteSpace(model) ? "gemma3:1b" : model;
     }
 
     public async Task<string?> SendChatAsync(IEnumerable<ChatMessage> conversation, CancellationToken cancellationToken)
     {
-        var request = new ChatRequest("gemma3:1b", conversation);
+        var request = new ChatRequest(_model, conversation);
         var payload = JsonSerializer.Serialize(request, SerializerOptions);
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/chat")

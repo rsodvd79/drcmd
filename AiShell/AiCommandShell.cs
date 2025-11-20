@@ -27,7 +27,7 @@ public sealed class AiCommandShell
             new ChatMessage(
                 "system",
                 """
-                Sei un assistente che aiuta l'utente a usare il terminale Unix. Rispondi esclusivamente con un oggetto JSON. Il formato deve essere:
+                Sei un assistente che aiuta l'utente a usare un terminale locale interattivo. Lavori sempre da shell (cmd.exe su Windows, /bin/bash su macOS/Linux) e devi proporre solo comandi validi per il sistema operativo corrente (dettagli forniti in un messaggio di contesto). Rispondi esclusivamente con un oggetto JSON nel formato:
                 {
                   "command": string|null,
                   "explanation": string,
@@ -163,7 +163,12 @@ public sealed class AiCommandShell
             return;
         }
 
-        var result = await _commandExecutor.ExecuteAsync(command, _currentDirectory, cancellationToken);
+        var result = await _commandExecutor.ExecuteAsync(
+            command,
+            _currentDirectory,
+            cancellationToken,
+            Console.Out,
+            Console.Error);
         PrintCommandResult(result);
     }
 
@@ -196,8 +201,9 @@ public sealed class AiCommandShell
         var architecture = RuntimeInformation.ProcessArchitecture;
         var framework = RuntimeInformation.FrameworkDescription;
         var currentDirectory = Directory.GetCurrentDirectory();
+        var shell = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/bash";
 
-        return $"Contesto ambiente: sistema operativo={osDescription} ({architecture}), framework={framework}, directory_corrente={currentDirectory}.";
+        return $"Contesto ambiente: sistema operativo={osDescription} ({architecture}), shell={shell}, framework={framework}, directory_corrente={currentDirectory}.";
     }
 
     private string BuildPrompt()
@@ -462,14 +468,19 @@ public sealed class AiCommandShell
 
     private static void PrintCommandResult(CommandExecutionResult result)
     {
-        if (result.StandardOutput.Length > 0)
+        if (!result.OutputStreamed && result.StandardOutput.Length > 0)
         {
             Console.Write(result.StandardOutput);
         }
 
-        if (result.StandardError.Length > 0)
+        if (!result.OutputStreamed && result.StandardError.Length > 0)
         {
             Console.Error.Write(result.StandardError);
+        }
+
+        if (result.WasCanceled)
+        {
+            Console.Error.WriteLine("Esecuzione annullata dall'utente.");
         }
     }
 
@@ -499,16 +510,32 @@ public sealed class AiCommandShell
         Console.WriteLine("  AI Shell con Ollama (modello gemma3:1b)  ");
         Console.WriteLine("==========================================");
         Console.WriteLine("Digita un comando per eseguirlo, oppure inizia con '#' per chiedere un suggerimento all'AI.");
-        Console.WriteLine("Comandi utili: help, exit");
+        Console.WriteLine("Comandi utili: help, history, auto_accetta, exit");
         Console.WriteLine();
     }
 
     private static void PrintHelp()
     {
         Console.WriteLine("help                Mostra questo messaggio.");
+        Console.WriteLine("history             Mostra la cronologia dei comandi della sessione.");
+        Console.WriteLine("auto_accetta [on|off] Attiva o disattiva l'esecuzione automatica dei suggerimenti AI.");
         Console.WriteLine("exit | quit | :q    Esce dalla shell.");
         Console.WriteLine("#<testo>            Chiede un suggerimento al modello gemma3:1b.");
         Console.WriteLine("<comando>           Esegue il comando direttamente tramite la shell.");
+    }
+
+    private void PrintHistory()
+    {
+        if (_commandHistory.Count == 0)
+        {
+            Console.WriteLine("Cronologia vuota.");
+            return;
+        }
+
+        for (var i = 0; i < _commandHistory.Count; i++)
+        {
+            Console.WriteLine($"{i + 1,3}: {_commandHistory[i]}");
+        }
     }
 
     private bool TryHandleBuiltInCommand(string command)
@@ -517,6 +544,12 @@ public sealed class AiCommandShell
         if (trimmed.StartsWith("auto_accetta", StringComparison.OrdinalIgnoreCase))
         {
             HandleAutoAcceptCommand(trimmed);
+            return true;
+        }
+
+        if (trimmed.Equals("history", StringComparison.OrdinalIgnoreCase))
+        {
+            PrintHistory();
             return true;
         }
 

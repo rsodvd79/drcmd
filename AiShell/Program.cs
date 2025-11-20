@@ -1,6 +1,8 @@
 using AiShell;
 using AiShell.IO;
 
+var options = ShellOptions.FromArgs(args);
+
 var cancellationSource = new CancellationTokenSource();
 Console.CancelKeyPress += (_, args) =>
 {
@@ -10,9 +12,9 @@ Console.CancelKeyPress += (_, args) =>
 
 using var httpClient = new HttpClient
 {
-    BaseAddress = new Uri("http://localhost:11434", UriKind.Absolute),
+    BaseAddress = new Uri(options.Endpoint, UriKind.Absolute),
     Timeout = TimeSpan.FromSeconds(120)
 };
 
-var shell = new AiCommandShell(new OllamaClient(httpClient), new CommandExecutor());
+var shell = new AiCommandShell(new OllamaClient(httpClient, options.Model), new CommandExecutor());
 await shell.RunAsync(cancellationSource.Token);
