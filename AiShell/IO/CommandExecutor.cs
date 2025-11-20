@@ -108,7 +108,11 @@ public sealed class CommandExecutor
         }
         catch
         {
-            // Ignore termination errors
+            // Termination errors are ignored because they typically occur if:
+            // - The process has already exited (ObjectDisposedException, InvalidOperationException)
+            // - Access is denied (AccessDeniedException)
+            // In the context of cancellation, it's safe to ignore these errors since the process is either already gone or cannot be forcibly terminated,
+            // and failure to terminate does not affect the overall cancellation logic.
         }
     }
 
